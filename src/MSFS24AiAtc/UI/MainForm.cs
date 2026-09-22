@@ -5,135 +5,134 @@ namespace MSFS24AiAtc.UI;
 
 public sealed class MainForm : Form
 {
-    private readonly AccountService _accounts;
-    private readonly ModerationService _moderation;
-    private readonly AirportService _airports;
-    private readonly SimConnectService _sim;
-    private readonly AiProviderManager _ai;
-    private readonly SpeechService _speech;
+    private readonly AccountService accounts;
+    private readonly ModerationService moderation;
+    private readonly SimConnectService sim;
+    private readonly AiProviderManager ai;
+    private readonly RadioAudioService radio;
+    private readonly SecureSettings settings;
 
     private readonly Label status = new();
-    private readonly ComboBox model = new();
-    private readonly ComboBox controller = new();
-    private readonly TextBox transcript = new();
-    private UserAccount? _user;
+    private readonly Label frequency = new();
+    private readonly TextBox log = new();
+    private UserAccount? user;
 
-    public MainForm(AccountService accounts, ModerationService moderation, AirportService airports,
-        SimConnectService sim, AiProviderManager ai, SpeechService speech)
+    public MainForm(AccountService accounts, ModerationService moderation, SimConnectService sim,
+        AiProviderManager ai, RadioAudioService radio, SecureSettings settings)
     {
-        _accounts = accounts;
-        _moderation = moderation;
-        _airports = airports;
-        _sim = sim;
-        _ai = ai;
-        _speech = speech;
+        this.accounts = accounts;
+        this.moderation = moderation;
+        this.sim = sim;
+        this.ai = ai;
+        this.radio = radio;
+        this.settings = settings;
 
         Text = "MSFS24 AI ATC";
-        Width = 1100;
-        Height = 720;
-        MinimumSize = new Size(900, 600);
-        BackColor = Color.FromArgb(18, 20, 24);
+        Width = 1200;
+        Height = 760;
+        MinimumSize = new Size(1000, 650);
+        BackColor = Color.FromArgb(15, 17, 21);
         ForeColor = Color.White;
 
         BuildUi();
-        Shown += (_, _) => ShowLogin();
-        FormClosing += (_, _) => _sim.Dispose();
+        Shown += (_, _) => Login();
+        FormClosing += (_, _) => sim.Dispose();
     }
 
     private void BuildUi()
     {
-        var top = new Panel { Dock = DockStyle.Top, Height = 70, Padding = new Padding(18) };
-        var title = new Label { Text = "MSFS24 AI ATC", AutoSize = true, Font = new Font("Segoe UI", 20, FontStyle.Bold) };
-        status.Text = "● MSFS 2024: Not connected";
+        var header = new Panel { Dock = DockStyle.Top, Height = 74, Padding = new Padding(18) };
+        header.Controls.Add(new Label {
+            Text = "MSFS24 AI ATC",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 21, FontStyle.Bold)
+        });
+
+        status.Text = "● MSFS 2024 — Waiting";
         status.AutoSize = true;
         status.Left = 280;
-        status.Top = 12;
+        status.Top = 17;
         status.ForeColor = Color.Gold;
-        top.Controls.Add(title);
-        top.Controls.Add(status);
+        header.Controls.Add(status);
 
-        var nav = new FlowLayoutPanel { Dock = DockStyle.Left, Width = 220, FlowDirection = FlowDirection.TopDown, Padding = new Padding(16), WrapContents = false };
-        foreach (var name in new[] { "Flight", "Frequencies", "AI Models", "Audio", "Settings", "Account" })
-        {
-            var b = new Button { Text = name, Width = 185, Height = 42, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 0, 8) };
-            b.Click += (_, _) => MessageBox.Show($"{name} panel is part of the current application shell.");
-            nav.Controls.Add(b);
-        }
+        var freqPanel = new Panel { Dock = DockStyle.Top, Height = 82, Padding = new Padding(20) };
+        frequency.Text = "ACTIVE FREQUENCY  —  ---";
+        frequency.Font = new Font("Consolas", 20, FontStyle.Bold);
+        frequency.AutoSize = true;
+        freqPanel.Controls.Add(frequency);
+
+        var nav = new FlowLayoutPanel {
+            Dock = DockStyle.Left, Width = 230, Padding = new Padding(16),
+            FlowDirection = FlowDirection.TopDown, WrapContents = false
+        };
+
+        AddNav(nav, "Flight");
+        AddNav(nav, "Frequencies");
+        AddNav(nav, "Traffic");
+        AddNav(nav, "ATC Log");
+        AddNav(nav, "AI Models", () => new SettingsForm(settings, ai).ShowDialog(this));
+        AddNav(nav, "API & Settings", () => new SettingsForm(settings, ai).ShowDialog(this));
 
         var content = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20) };
-        var heading = new Label { Text = "AI Controller Configuration", Font = new Font("Segoe UI", 16, FontStyle.Bold), AutoSize = true };
-        heading.Top = 10;
+        log.Multiline = true;
+        log.ReadOnly = true;
+        log.ScrollBars = ScrollBars.Vertical;
+        log.Dock = DockStyle.Fill;
+        log.Font = new Font("Consolas", 11);
+        content.Controls.Add(log);
 
-        controller.Items.AddRange(Enum.GetNames<ControllerType>());
-        controller.SelectedIndex = 0;
-        controller.Left = 10;
-        controller.Top = 55;
-        controller.Width = 220;
-
-        model.Items.AddRange(_ai.Models.Select(x => $"{x.Provider} / {x.Model}").ToArray());
-        model.SelectedIndex = 0;
-        model.Left = 250;
-        model.Top = 55;
-        model.Width = 300;
-
-        transcript.Multiline = true;
-        transcript.ReadOnly = true;
-        transcript.ScrollBars = ScrollBars.Vertical;
-        transcript.Left = 10;
-        transcript.Top = 115;
-        transcript.Width = 790;
-        transcript.Height = 330;
-        transcript.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-
-        var connect = new Button { Text = "Connect to MSFS 2024", Left = 10, Top = 465, Width = 220, Height = 45 };
+        var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 62 };
+        var connect = new Button { Text = "Connect to MSFS 2024", Width = 190, Height = 42 };
         connect.Click += (_, _) => Connect();
+        var settingsButton = new Button { Text = "Settings", Width = 110, Height = 42 };
+        settingsButton.Click += (_, _) => new SettingsForm(settings, ai).ShowDialog(this);
+        bottom.Controls.Add(connect);
+        bottom.Controls.Add(settingsButton);
 
-        var test = new Button { Text = "Test ATC Voice", Left = 245, Top = 465, Width = 180, Height = 45 };
-        test.Click += async (_, _) => await TestVoice();
-
-        content.Controls.AddRange([heading, controller, model, transcript, connect, test]);
         Controls.Add(content);
         Controls.Add(nav);
-        Controls.Add(top);
+        Controls.Add(bottom);
+        Controls.Add(freqPanel);
+        Controls.Add(header);
+    }
+
+    private void AddNav(FlowLayoutPanel nav, string text, Action? action = null)
+    {
+        var button = new Button { Text = text, Width = 195, Height = 40, FlatStyle = FlatStyle.Flat };
+        button.Click += (_, _) => action?.Invoke();
+        nav.Controls.Add(button);
     }
 
     private void Connect()
     {
-        if (_sim.TryConnect(Handle))
+        if (sim.TryConnect(Handle))
         {
-            status.Text = "● MSFS 2024: Connected";
+            status.Text = "● MSFS 2024 — Connected";
             status.ForeColor = Color.LightGreen;
-            transcript.AppendText("[SIM] Connected to MSFS 2024.
-");
+            Write("SIM", "Connected to Microsoft Flight Simulator 2024.");
         }
         else
         {
-            status.Text = "● MSFS 2024: Not connected";
+            status.Text = "● MSFS 2024 — Waiting";
             status.ForeColor = Color.Gold;
-            transcript.AppendText("[SIM] MSFS 2024 was not detected. Start a flight and try again.
-");
+            Write("SIM", "MSFS 2024 not detected. Start the simulator and try again.");
         }
     }
 
-    private async Task TestVoice()
-    {
-        var text = "Shamrock Five Five Eight Three, Dublin Control, descend flight level two four zero.";
-        transcript.AppendText($"[ATC] {text}
-");
-        await _speech.SpeakAsync(text);
-    }
+    private void Write(string source, string text) =>
+        log.AppendText($"[{DateTime.Now:HH:mm:ss}] [{source}] {text}{Environment.NewLine}");
 
-    private void ShowLogin()
+    private void Login()
     {
-        using var dialog = new LoginForm(_accounts);
+        using var dialog = new LoginForm(accounts);
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.User is null)
         {
             Close();
             return;
         }
 
-        _user = dialog.User;
-        if (_user.Suspended)
+        user = dialog.User;
+        if (user.Suspended)
         {
             MessageBox.Show("This account is suspended.", "MSFS24 AI ATC");
             Close();
@@ -143,49 +142,47 @@ public sealed class MainForm : Form
 
 internal sealed class LoginForm : Form
 {
-    private readonly AccountService _accounts;
+    private readonly AccountService accounts;
     private readonly TextBox username = new();
     private readonly TextBox password = new();
     public UserAccount? User { get; private set; }
 
     public LoginForm(AccountService accounts)
     {
-        _accounts = accounts;
+        this.accounts = accounts;
         Text = "MSFS24 AI ATC Account";
-        Width = 420;
-        Height = 260;
+        Width = 430;
+        Height = 270;
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
 
-        var u = new Label { Text = "Username", Left = 25, Top = 25, AutoSize = true };
-        username.SetBounds(25, 48, 350, 30);
-        var p = new Label { Text = "Password", Left = 25, Top = 88, AutoSize = true };
-        password.SetBounds(25, 111, 350, 30);
+        Controls.Add(new Label { Text = "Username", Left = 25, Top = 25, AutoSize = true });
+        username.SetBounds(25, 48, 360, 30);
+        Controls.Add(username);
+
+        Controls.Add(new Label { Text = "Password", Left = 25, Top = 88, AutoSize = true });
+        password.SetBounds(25, 111, 360, 30);
         password.UseSystemPasswordChar = true;
+        Controls.Add(password);
 
-        var login = new Button { Text = "Log in", Left = 25, Top = 155, Width = 105 };
+        var login = new Button { Text = "Log in", Left = 25, Top = 160, Width = 110 };
         login.Click += (_, _) => TryLogin();
-
-        var create = new Button { Text = "Create account", Left = 145, Top = 155, Width = 130 };
+        var create = new Button { Text = "Create account", Left = 150, Top = 160, Width = 135 };
         create.Click += (_, _) => TryCreate();
 
-        Controls.AddRange([u, username, p, password, login, create]);
+        Controls.Add(login);
+        Controls.Add(create);
     }
 
     private void TryLogin()
     {
-        try { User = _accounts.Login(username.Text, password.Text); DialogResult = DialogResult.OK; }
+        try { User = accounts.Login(username.Text, password.Text); DialogResult = DialogResult.OK; }
         catch (Exception ex) { MessageBox.Show(ex.Message); }
     }
 
     private void TryCreate()
     {
-        try
-        {
-            User = _accounts.Create(username.Text, password.Text);
-            MessageBox.Show("Account created.");
-            DialogResult = DialogResult.OK;
-        }
+        try { User = accounts.Create(username.Text, password.Text); DialogResult = DialogResult.OK; }
         catch (Exception ex) { MessageBox.Show(ex.Message); }
     }
 }

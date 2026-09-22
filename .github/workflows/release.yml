@@ -1,0 +1,33 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version
+        required: true
+        default: 0.2.0
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Check SimConnect SDK
+        shell: pwsh
+        run: |
+          if (!(Test-Path "lib/SimConnect/SimConnect.dll")) { throw "SimConnect.dll is missing." }
+          if (!(Test-Path "lib/SimConnect/Microsoft.FlightSimulator.SimConnect.dll")) { throw "Managed SimConnect DLL is missing." }
+      - name: Publish
+        run: dotnet publish src/MSFS24AiAtc/MSFS24AiAtc.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build installer EXE
+        run: iscc installer/MSFS24AiAtc.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MSFS24-AI-ATC-Installer
+          path: installer/output/MSFS24-AI-ATC-Setup.exe

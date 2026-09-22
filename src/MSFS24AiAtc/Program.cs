@@ -1,4 +1,3 @@
-using MSFS24AiAtc.Core;
 using MSFS24AiAtc.Data;
 using MSFS24AiAtc.Services;
 using MSFS24AiAtc.UI;
@@ -11,12 +10,12 @@ Directory.CreateDirectory(dataDir);
 var database = new AppDatabase(Path.Combine(dataDir, "accounts.db"));
 database.Initialize();
 
-var accountService = new AccountService(database);
+var accounts = new AccountService(database);
 var moderation = new ModerationService(database);
-var airportService = new AirportService();
-var simConnect = new SimConnectService();
-var ai = new AiProviderManager();
-var speech = new SpeechService();
+var settings = new SecureSettings();
+var ai = new AiProviderManager(settings);
+var radio = new RadioAudioService();
+var sim = new SimConnectService();
 
-using var form = new MainForm(accountService, moderation, airportService, simConnect, ai, speech);
+using var form = new MainForm(accounts, moderation, sim, ai, radio, settings);
 Application.Run(form);

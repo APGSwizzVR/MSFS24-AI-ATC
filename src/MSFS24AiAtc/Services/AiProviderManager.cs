@@ -12,9 +12,10 @@ public sealed class AiProviderManager
 
     public IReadOnlyList<AiModel> Models { get; } =
     [
-        new("OpenAI", "gpt-live-1"),
-        new("OpenAI", "gpt-live-1-mini"),
-        new("OpenAI", "gpt-5.6"),
+        new("OpenAI Realtime", "gpt-realtime"),
+        new("OpenAI Realtime Mini", "gpt-realtime-mini"),
+        new("OpenAI Text", "gpt-5.6"),
+        new("OpenAI Text Mini", "gpt-5.6-luna"),
         new("Custom", "OpenAI-compatible endpoint")
     ];
 
@@ -24,7 +25,7 @@ public sealed class AiProviderManager
     {
         var value = settings.Get("model." + type);
         return Models.FirstOrDefault(x => $"{x.Provider}/{x.Model}".Equals(value, StringComparison.OrdinalIgnoreCase))
-            ?? new AiModel("OpenAI", "gpt-live-1");
+            ?? new AiModel("OpenAI Realtime", "gpt-realtime");
     }
 
     public void SetModel(ControllerType type, AiModel model) =>
@@ -33,63 +34,58 @@ public sealed class AiProviderManager
     public string BuildSystemPrompt(ControllerType type, AirportInfo airport) =>
         "You are a professional " + type + " air traffic controller at " + airport.Icao + ", " + airport.Name + ". " +
         "Use concise realistic aviation radio phraseology. Never invent runway, frequency, procedure, weather, traffic, aircraft or clearance data. " +
-        "Live simulator and facility data are authoritative. Do not discuss unrelated subjects. " +
-        "Return only the controller transmission.";
+        "Live simulator and facility data are authoritative. Do not discuss unrelated subjects. Return only the controller transmission.";
 
     public async Task<string> GenerateAsync(string prompt, ControllerType type, CancellationToken ct)
     {
         var model = GetModel(type);
+        if (model.Provider == "OpenAI Realtime" || model.Provider == "OpenAI Realtime Mini")
+            return prompt;
+
         var key = settings.Get("api.openai");
-
-        if (model.Provider == "OpenAI" && string.IsNullOrWhiteSpace(key))
-            throw new InvalidOperationException("OpenAI API key is not configured. Open Settings > API & AI.");
-
-        if (model.Provider == "Custom")
+        if (model.Provider == "OpenAI Text" || model.Provider == "OpenAI Text Mini")
         {
-            var endpoint = settings.Get("api.custom.endpoint");
-            var customKey = settings.Get("api.custom.key");
-            if (string.IsNullOrWhiteSpace(endpoint))
-                throw new InvalidOperationException("Custom AI endpoint is not configured.");
-            return await CallCompatibleAsync(endpoint, customKey, model.Model, prompt, ct);
+            if (string.IsNullOrWhiteSpace(key))
+                throw new InvalidOperationException("OpenAI API key is not configured. Open Settings > API & AI.");
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/responses");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+            request.Content = new StringContent(JsonSerializer.Serialize(new
+            {
+                model = model.Model,
+                input = prompt,
+                max_output_tokens = 180
+            }), Encoding.UTF8, "application/json");
+
+            using var response = await http.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException("OpenAI request failed: " + json);
+
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty("output_text", out var text) ? text.GetString() ?? "" : "";
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/responses");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        request.Content = new StringContent(JsonSerializer.Serialize(new
+        var endpoint = settings.Get("api.custom.endpoint");
+        var customKey = settings.Get("api.custom.key");
+        if (string.IsNullOrWhiteSpace(endpoint))
+            throw new InvalidOperationException("Custom AI endpoint is not configured.");
+
+        using var customRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+        if (!string.IsNullOrWhiteSpace(customKey))
+            customRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customKey);
+
+        customRequest.Content = new StringContent(JsonSerializer.Serialize(new
         {
             model = model.Model,
-            input = prompt,
-            max_output_tokens = 180
-        }), Encoding.UTF8, "application/json");
-
-        using var response = await http.SendAsync(request, ct);
-        var json = await response.Content.ReadAsStringAsync(ct);
-        if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException("OpenAI request failed: " + json);
-
-        using var doc = JsonDocument.Parse(json);
-        return doc.RootElement.TryGetProperty("output_text", out var text)
-            ? text.GetString() ?? ""
-            : "";
-    }
-
-    private async Task<string> CallCompatibleAsync(string endpoint, string key, string model, string prompt, CancellationToken ct)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
-        if (!string.IsNullOrWhiteSpace(key))
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-
-        request.Content = new StringContent(JsonSerializer.Serialize(new
-        {
-            model,
             messages = new[] { new { role = "user", content = prompt } }
         }), Encoding.UTF8, "application/json");
 
-        using var response = await http.SendAsync(request, ct);
-        var json = await response.Content.ReadAsStringAsync(ct);
-        if (!response.IsSuccessStatusCode) throw new InvalidOperationException(json);
+        using var customResponse = await http.SendAsync(customRequest, ct);
+        var customJson = await customResponse.Content.ReadAsStringAsync(ct);
+        if (!customResponse.IsSuccessStatusCode) throw new InvalidOperationException(customJson);
 
-        using var doc = JsonDocument.Parse(json);
-        return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+        using var customDoc = JsonDocument.Parse(customJson);
+        return customDoc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
     }
 }

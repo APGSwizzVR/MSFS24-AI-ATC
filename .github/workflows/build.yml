@@ -1,0 +1,28 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Check SimConnect dependency
+        shell: pwsh
+        run: |
+          if (!(Test-Path "lib/SimConnect/Microsoft.FlightSimulator.SimConnect.dll")) {
+            Write-Host "SimConnect SDK binaries are not committed. Build artifact generation is skipped."
+            exit 0
+          }
+      - name: Publish
+        run: dotnet publish src/MSFS24AiAtc/MSFS24AiAtc.csproj -c Release -r win-x64 --self-contained true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MSFS24-AI-ATC-win-x64
+          path: src/MSFS24AiAtc/bin/x64/Release/net8.0-windows/win-x64/publish/
